@@ -8,7 +8,7 @@ pub mod router;
 pub mod types;
 
 pub use cache::LlmCache;
-pub use client::OllamaClient;
+pub use client::{ModelInfo, OllamaClient};
 pub use config::LlmConfig;
 pub use error::{LlmError, Result};
 pub use router::ModelRouter;

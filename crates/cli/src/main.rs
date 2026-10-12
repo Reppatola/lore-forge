@@ -1,4 +1,5 @@
-﻿use std::path::PathBuf;
+﻿use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
@@ -7,7 +8,7 @@ use tracing_subscriber::EnvFilter;
 
 use loreforge_extract::{extract_chapter, ExtractConfig, PromptTemplate};
 use loreforge_ingest::{chunk_chapter, scan_input, ChunkConfig, Manifest};
-use loreforge_llm::{LlmCache, LlmConfig, OllamaClient};
+use loreforge_llm::{LlmCache, LlmConfig, ModelInfo, OllamaClient};
 use loreforge_merge::merge_all;
 use loreforge_storage::{read_chunks, write_chunks, OutputPaths};
 
@@ -49,6 +50,12 @@ enum Command {
         force: bool,
         #[arg(long, default_value = "extract_heavy")]
         task: String,
+        /// Модель (если не указана — интерактивный выбор).
+        #[arg(long)]
+        model: Option<String>,
+        /// Не спрашивать, использовать дефолт из конфига.
+        #[arg(long)]
+        no_select: bool,
     },
 
     /// Слить extracted в единые объекты базы.
@@ -65,6 +72,19 @@ enum Command {
         force: bool,
         #[arg(long, default_value = "extract_heavy")]
         task: String,
+        /// Модель (если не указана — интерактивный выбор).
+        #[arg(long)]
+        model: Option<String>,
+        /// Не спрашивать, использовать дефолт из конфига.
+        #[arg(long)]
+        no_select: bool,
+    },
+
+    /// Показать список моделей в Ollama.
+    Models {
+        /// Сохранить выбранную модель как default в loreforge.toml.
+        #[arg(long)]
+        set: Option<String>,
     },
 
     /// Показать статистику базы.
@@ -118,7 +138,9 @@ async fn run(cli: Cli) -> Result<()> {
             chapter,
             force,
             task,
-        } => cmd_extract(&paths, chapter, force, task).await,
+            model,
+            no_select,
+        } => cmd_extract(&paths, chapter, force, task, model, no_select).await,
 
         Command::Merge { force } => cmd_merge(&paths, force),
 
@@ -126,12 +148,179 @@ async fn run(cli: Cli) -> Result<()> {
             input,
             force,
             task,
-        } => cmd_run(&paths, &input, force, task).await,
+            model,
+            no_select,
+        } => cmd_run(&paths, &input, force, task, model, no_select).await,
+
+        Command::Models { set } => cmd_models(&paths, set).await,
 
         Command::Stats => cmd_stats(&paths),
 
         Command::Ping => cmd_ping(&paths).await,
     }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Модели и интерактивный выбор
+// ────────────────────────────────────────────────────────────────────
+
+/// Сортировка моделей по «рекомендуемости» для нашей задачи.
+fn sort_models_by_recommendation(models: &mut Vec<ModelInfo>) {
+    models.sort_by_key(|m| {
+        let n = m.name.to_lowercase();
+        if n.contains("qwen2.5-coder:14b") {
+            0
+        } else if n.contains("qwen2.5-coder:7b") {
+            1
+        } else if n.contains("qwen2.5-coder") {
+            2
+        } else if n.contains("qwen3") {
+            3
+        } else {
+            4
+        }
+    });
+}
+
+/// Показывает список моделей и просит выбрать.
+/// Возвращает выбранное имя модели.
+fn interactive_pick_model(models: &[ModelInfo], current: &str) -> Result<String> {
+    if models.is_empty() {
+        anyhow::bail!("нет доступных моделей");
+    }
+
+    println!();
+    println!("Выберите модель для извлечения:");
+    println!();
+
+    for (i, m) in models.iter().enumerate() {
+        let size = m.size_human();
+        let is_current = m.name == current;
+        let is_recommended = i == 0 && !is_current;
+        let marker = if is_current {
+            "  ← текущая"
+        } else if is_recommended {
+            "  ← рекомендуемая"
+        } else {
+            ""
+        };
+        println!("  {}. {:<45} {:>10}{}", i + 1, m.name, size, marker);
+    }
+    println!();
+
+    loop {
+        print!("Выбор [1-{}, Enter = 1]: ", models.len());
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .context("не удалось прочитать ввод")?;
+        let input = input.trim();
+
+        if input.is_empty() {
+            return Ok(models[0].name.clone());
+        }
+
+        match input.parse::<usize>() {
+            Ok(n) if n >= 1 && n <= models.len() => {
+                return Ok(models[n - 1].name.clone());
+            }
+            _ => {
+                println!("Неверный выбор (введите число от 1 до {}).", models.len());
+            }
+        }
+    }
+}
+
+/// Проверка Ollama + выбор модели (если нужно).
+/// Возвращает финальное имя модели.
+async fn resolve_model(
+    llm_cfg: &mut LlmConfig,
+    cfg_path: &std::path::Path,
+    explicit_model: Option<String>,
+    no_select: bool,
+) -> Result<String> {
+    // 1. Если модель указана явно — используем её.
+    if let Some(m) = explicit_model {
+        tracing::info!("модель из CLI: {}", m);
+        if llm_cfg.default_model != m {
+            llm_cfg.default_model = m.clone();
+            if let Err(e) = llm_cfg.save(cfg_path) {
+                tracing::warn!("не удалось сохранить модель в конфиг: {e}");
+            }
+        }
+        return Ok(m);
+    }
+
+    // 2. Если --no-select — берём из конфига.
+    if no_select {
+        tracing::info!("модель из конфига: {}", llm_cfg.default_model);
+        return Ok(llm_cfg.default_model.clone());
+    }
+
+    // 3. Проверяем Ollama.
+    let client = OllamaClient::new(llm_cfg)?;
+    let mut models = match client.list_models().await {
+        Ok(m) => m,
+        Err(e) => {
+            print_ollama_help(&client, &e.to_string());
+            anyhow::bail!("Ollama недоступна");
+        }
+    };
+
+    if models.is_empty() {
+        print_no_models_help();
+        anyhow::bail!("нет доступных моделей в Ollama");
+    }
+
+    sort_models_by_recommendation(&mut models);
+
+    // 4. Интерактивный выбор.
+    let chosen = interactive_pick_model(&models, &llm_cfg.default_model)?;
+
+    // 5. Сохраняем, если отличается.
+    if chosen != llm_cfg.default_model {
+        llm_cfg.default_model = chosen.clone();
+        if let Err(e) = llm_cfg.save(cfg_path) {
+            tracing::warn!("не удалось сохранить модель в конфиг: {e}");
+        } else {
+            tracing::info!("модель сохранена в {}", cfg_path.display());
+        }
+    }
+
+    Ok(chosen)
+}
+
+fn print_ollama_help(client: &OllamaClient, err: &str) {
+    eprintln!();
+    eprintln!("╔══════════════════════════════════════════════════╗");
+    eprintln!("║   Ollama не отвечает                             ║");
+    eprintln!("╚══════════════════════════════════════════════════╝");
+    eprintln!();
+    eprintln!("Endpoint: {}", client.endpoint());
+    eprintln!("Ошибка:   {}", err);
+    eprintln!();
+    eprintln!("Возможные причины:");
+    eprintln!("  1. Ollama не установлена");
+    eprintln!("     → Скачай: https://ollama.com/download");
+    eprintln!("  2. Ollama не запущена");
+    eprintln!("     → Запусти Ollama из меню Пуск");
+    eprintln!();
+    eprintln!("После установки и запуска — повтори команду.");
+}
+
+fn print_no_models_help() {
+    eprintln!();
+    eprintln!("╔══════════════════════════════════════════════════╗");
+    eprintln!("║   Моделей не найдено                             ║");
+    eprintln!("╚══════════════════════════════════════════════════╝");
+    eprintln!();
+    eprintln!("Установи одну из рекомендуемых:");
+    eprintln!("  ollama pull qwen2.5-coder:7b     (быстрая, ~5 ГБ)");
+    eprintln!("  ollama pull qwen2.5-coder:14b    (рекомендуется, ~10 ГБ)");
+    eprintln!("  ollama pull qwen3:8b-64k         (длинные тексты, ~5 ГБ)");
+    eprintln!();
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -158,7 +347,6 @@ fn cmd_init(paths: &OutputPaths) -> Result<()> {
         }
     }
 
-    // Дефолтный промпт
     let prompt_path = paths.root.join("prompts").join("extract_entities.md");
     if !prompt_path.exists() {
         std::fs::write(&prompt_path, DEFAULT_PROMPT)?;
@@ -167,7 +355,6 @@ fn cmd_init(paths: &OutputPaths) -> Result<()> {
         println!("  - уже есть: {}", prompt_path.display());
     }
 
-    // Дефолтный конфиг
     let cfg_path = paths.root.join("loreforge.toml");
     if !cfg_path.exists() {
         std::fs::write(&cfg_path, DEFAULT_CONFIG)?;
@@ -248,10 +435,14 @@ async fn cmd_extract(
     chapter_filter: Option<u32>,
     force: bool,
     task: String,
+    model_override: Option<String>,
+    no_select: bool,
 ) -> Result<()> {
     let cfg_path = paths.root.join("loreforge.toml");
-    let llm_cfg = LlmConfig::load_or_default(&cfg_path);
-    let model = llm_cfg.model_for(&task);
+    let mut llm_cfg = LlmConfig::load_or_default(&cfg_path);
+
+    // Определяем модель: явно, интерактивно, или из конфига.
+    let model = resolve_model(&mut llm_cfg, &cfg_path, model_override, no_select).await?;
     tracing::info!("модель для задачи {}: {}", task, model);
 
     let client = OllamaClient::new(&llm_cfg)?;
@@ -320,7 +511,6 @@ async fn cmd_extract(
         }
         std::fs::write(&out_file, lines)?;
 
-        // сохранение чистых raw-ответов для отладки
         let raw_dir = paths.output.join("_meta").join("raw");
         std::fs::create_dir_all(&raw_dir)?;
         for r in &results {
@@ -384,8 +574,17 @@ async fn cmd_run(
     input: &PathBuf,
     force: bool,
     task: String,
+    model_override: Option<String>,
+    no_select: bool,
 ) -> Result<()> {
     tracing::info!("=== RUN: полный цикл ===");
+    tracing::info!("");
+
+    // Сначала — выбор модели, чтобы не ждать ingest и потом не удивляться.
+    let cfg_path = paths.root.join("loreforge.toml");
+    let mut llm_cfg = LlmConfig::load_or_default(&cfg_path);
+    let model = resolve_model(&mut llm_cfg, &cfg_path, model_override, no_select).await?;
+    tracing::info!("модель: {}", model);
     tracing::info!("");
 
     tracing::info!("[1/3] ingest");
@@ -393,7 +592,8 @@ async fn cmd_run(
 
     tracing::info!("");
     tracing::info!("[2/3] extract");
-    cmd_extract(paths, None, force, task).await?;
+    // Здесь no_select=true, чтобы не спрашивать повторно — модель уже выбрана.
+    cmd_extract(paths, None, force, task, Some(model), true).await?;
 
     tracing::info!("");
     tracing::info!("[3/3] merge");
@@ -402,6 +602,69 @@ async fn cmd_run(
     tracing::info!("");
     tracing::info!("=== RUN завершён ===");
     tracing::info!("База: {}/entities/", paths.output.display());
+    Ok(())
+}
+
+// ────────────────────────────────────────────────────────────────────
+// models
+// ────────────────────────────────────────────────────────────────────
+
+async fn cmd_models(paths: &OutputPaths, set: Option<String>) -> Result<()> {
+    let cfg_path = paths.root.join("loreforge.toml");
+    let mut llm_cfg = LlmConfig::load_or_default(&cfg_path);
+    let client = OllamaClient::new(&llm_cfg)?;
+
+    let mut models = match client.list_models().await {
+        Ok(m) => m,
+        Err(e) => {
+            print_ollama_help(&client, &e.to_string());
+            anyhow::bail!("Ollama недоступна");
+        }
+    };
+
+    if models.is_empty() {
+        print_no_models_help();
+        return Ok(());
+    }
+
+    sort_models_by_recommendation(&mut models);
+
+    println!("Доступные модели в Ollama ({}):", models.len());
+    println!();
+    for (i, m) in models.iter().enumerate() {
+        let marker = if m.name == llm_cfg.default_model {
+            "  ← текущая"
+        } else {
+            ""
+        };
+        println!("  {}. {:<45} {:>10}{}", i + 1, m.name, m.size_human(), marker);
+    }
+    println!();
+    println!("Текущая default_model: {}", llm_cfg.default_model);
+    println!();
+
+    // Если --set указан — сохраняем.
+    if let Some(target) = set {
+        if !models.iter().any(|m| m.name == target) {
+            anyhow::bail!(
+                "модель {} не найдена в Ollama. Доступные: {}",
+                target,
+                models
+                    .iter()
+                    .map(|m| m.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        llm_cfg.default_model = target.clone();
+        llm_cfg.save(&cfg_path)?;
+        println!("✓ default_model сохранён в {}", cfg_path.display());
+        println!("  Теперь используется: {}", target);
+    } else {
+        println!("Чтобы изменить:");
+        println!("  loreforge models --set <имя>");
+    }
+
     Ok(())
 }
 

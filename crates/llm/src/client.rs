@@ -4,6 +4,26 @@ use crate::config::LlmConfig;
 use crate::error::{LlmError, Result};
 use crate::types::{GenerateOptions, GenerateRequest, GenerateResponse};
 
+/// Информация о модели.
+#[derive(Debug, Clone)]
+pub struct ModelInfo {
+    pub name: String,
+    pub size_bytes: u64,
+}
+
+impl ModelInfo {
+    /// Размер в человекочитаемом виде: "8.4 GB"
+    pub fn size_human(&self) -> String {
+        let gb = self.size_bytes as f64 / 1_073_741_824.0;
+        if gb >= 1.0 {
+            format!("{:.1} GB", gb)
+        } else {
+            let mb = self.size_bytes as f64 / 1_048_576.0;
+            format!("{:.0} MB", mb)
+        }
+    }
+}
+
 /// Клиент Ollama.
 #[derive(Debug, Clone)]
 pub struct OllamaClient {
@@ -24,12 +44,22 @@ impl OllamaClient {
         })
     }
 
-    /// Проверка, что Ollama отвечает.
-    pub async fn ping(&self) -> Result<Vec<String>> {
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    /// Список моделей с размерами.
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>> {
         #[derive(serde::Deserialize)]
-        struct TagsResponse { models: Vec<TagModel> }
+        struct TagsResponse {
+            models: Vec<TagModel>,
+        }
         #[derive(serde::Deserialize)]
-        struct TagModel { name: String }
+        struct TagModel {
+            name: String,
+            #[serde(default)]
+            size: u64,
+        }
 
         let url = format!("{}/api/tags", self.endpoint);
         let resp = self.http.get(&url).send().await?;
@@ -37,7 +67,24 @@ impl OllamaClient {
             return Err(LlmError::Ollama(format!("GET {} -> {}", url, resp.status())));
         }
         let tags: TagsResponse = resp.json().await?;
-        Ok(tags.models.into_iter().map(|m| m.name).collect())
+        Ok(tags
+            .models
+            .into_iter()
+            .map(|m| ModelInfo {
+                name: m.name,
+                size_bytes: m.size,
+            })
+            .collect())
+    }
+
+    /// Упрощённый список имён моделей (обратная совместимость).
+    pub async fn ping(&self) -> Result<Vec<String>> {
+        Ok(self
+            .list_models()
+            .await?
+            .into_iter()
+            .map(|m| m.name)
+            .collect())
     }
 
     /// Простой запрос: prompt + модель, ответ как строка.
