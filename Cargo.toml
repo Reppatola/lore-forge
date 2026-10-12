@@ -1,0 +1,44 @@
+﻿[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/ingest",
+    "crates/storage",
+    "crates/llm",
+    "crates/extract",
+    "crates/merge",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+authors = ["No4ka"]
+
+[workspace.dependencies]
+loreforge-core    = { path = "crates/core" }
+loreforge-ingest  = { path = "crates/ingest" }
+loreforge-storage = { path = "crates/storage" }
+loreforge-llm     = { path = "crates/llm" }
+loreforge-extract = { path = "crates/extract" }
+loreforge-merge   = { path = "crates/merge" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+blake3 = "1"
+chrono = { version = "0.4", features = ["serde"] }
+unicode-normalization = "0.1"
+regex = "1"
+walkdir = "2"
+futures = "0.3"
+tempfile = "3"

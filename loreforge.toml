@@ -1,0 +1,21 @@
+﻿[llm]
+endpoint = "http://localhost:11434"
+default_model = "qwen2.5-coder:14b"
+timeout_secs = 600
+retries = 3
+
+[llm.tasks]
+# Основная рабочая лошадка: стабильный JSON, structured output
+extract_heavy = "qwen2.5-coder:14b"
+
+# Быстрая coder-модель для мелких задач (теги, классификация)
+extract_light = "qwen2.5-coder:7b"
+
+# Для длинных чанков (64k контекста, если глава огромная)
+extract_long  = "qwen3:8b-64k"
+
+# Классификация сущностей
+classify      = "qwen2.5-coder:7b"
+
+# Генерация схем / промптов
+code          = "maternion/strand-rust-coder:14b-q4_K_M"

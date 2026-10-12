@@ -1,0 +1,32 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+
+# Данные проекта — генерируются (не коммитим)
+/data/output/
+/data/cache/
+/data/snapshots/
+
+# НО примеры главы — оставляем для демонстрации
+!/data/input/
+!data/input/001_тест.md
+
+# Локальные настройки
+*.local.toml
+.env
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ОС
+Thumbs.db
+.DS_Store
+
+# Логи
+*.log
+build.log
+test.log
+llm_err.txt

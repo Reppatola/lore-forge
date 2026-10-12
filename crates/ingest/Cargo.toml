@@ -1,0 +1,19 @@
+﻿[package]
+name = "loreforge-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+loreforge-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+blake3.workspace = true
+walkdir.workspace = true
+regex.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

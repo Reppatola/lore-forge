@@ -1,0 +1,24 @@
+﻿[package]
+name = "loreforge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "loreforge"
+path = "src/main.rs"
+
+[dependencies]
+loreforge-core.workspace = true
+loreforge-ingest.workspace = true
+loreforge-storage.workspace = true
+loreforge-llm.workspace = true
+loreforge-extract.workspace = true
+loreforge-merge.workspace = true
+
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
