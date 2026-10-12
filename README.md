@@ -8,7 +8,7 @@
 со всеми источниками и связями.
 
 Работает **локально** с моделями через [Ollama](https://ollama.com).
-Никаких облаков, никакого API, никаких утечек данных.
+Никаких облаков, никаких API, никаких утечек данных.
 
 ---
 
@@ -46,6 +46,36 @@
 
 ---
 
+## Установка
+
+### Вариант 1 — готовый `.exe` (рекомендуется)
+
+👉 **[Скачать последний релиз](https://github.com/Reppatola/lore-forge/releases/latest)**
+
+1. Скачай `loreforge-v0.1.0-windows-x64.zip`
+2. Распакуй в папку, например `C:\my-world\`
+3. Двойной клик на `install.bat` — создастся структура
+4. Положи главы в `data\input\` (формат: `001_название.md`)
+5. Двойной клик на `run.bat` — полный цикл
+
+**Требуется:**
+- Windows 10/11 (x64)
+- [Ollama](https://ollama.com) запущена
+- Модель: `ollama pull qwen2.5-coder:14b`
+
+### Вариант 2 — сборка из исходников
+
+```bash
+git clone https://github.com/Reppatola/lore-forge
+cd lore-forge
+cargo build --release
+# бинарник: target/release/loreforge.exe
+```
+
+**Требуется:** Rust 1.80+
+
+---
+
 ## Требования
 
 - **Windows / Linux / macOS**
@@ -61,50 +91,26 @@
 ```bash
 ollama list
 curl http://localhost:11434/api/tags
+```
 
-Установка
-Вариант 1 — portable .exe (проще)
-Скачай loreforge.exe со страницы Releases
+---
 
-Создай папку под проект, например C:\my-world\
+## Использование
 
-Положи loreforge.exe в эту папку
+### Быстрый старт
 
-Запусти первичную настройку:
+1. Положи главу в `data/input/`, например `001_начало.md`
+2. Запусти:
 
-bash
-cd C:\my-world
-loreforge.exe init
-Создастся структура:
-
-text
-my-world\
-├── loreforge.exe
-├── loreforge.toml          ← настройки LLM
-├── data\
-│   ├── input\              ← сюда главы
-│   ├── output\             ← база генерируется
-│   └── cache\              ← кеш LLM
-└── prompts\
-    └── extract_entities.md ← промпт (можно править)
-Вариант 2 — из исходников
-bash
-git clone https://github.com/yourname/lore-forge
-cd lore-forge
-cargo build --release
-# бинарник в target/release/loreforge.exe
-Использование
-Быстрый старт
-Положи главу в data/input/, например 001_начало.md
-
-Запусти:
-
-bash
+```bash
 loreforge.exe run
-Всё. Через 5–15 минут база готова: data/output/entities/.
+```
 
-Команды
-bash
+**Всё.** Через 5–15 минут база готова: `data/output/entities/`.
+
+### Команды
+
+```bash
 loreforge.exe init               # создать структуру (один раз)
 loreforge.exe ingest             # только порезать на чанки
 loreforge.exe extract            # только LLM-извлечение
@@ -112,15 +118,20 @@ loreforge.exe merge              # только сбор базы
 loreforge.exe run                # полный цикл (рекомендуется)
 loreforge.exe stats              # статистика
 loreforge.exe ping               # проверить Ollama
-Флаги:
+```
 
-bash
+**Флаги:**
+
+```bash
 --force                # игнорировать кеш, пересчитать всё
 --chapter 1            # только глава 1
 --task extract_heavy   # выбор модели из loreforge.toml
 --root C:\path         # явный корень (по умолчанию — папка рядом с .exe)
-Примеры
-bash
+```
+
+### Примеры
+
+```bash
 # Обработать только главу 5
 loreforge.exe extract --chapter 5
 
@@ -129,28 +140,34 @@ loreforge.exe merge --force
 
 # Полный цикл с игнорированием кеша
 loreforge.exe run --force
-Формат главы
-Файлы в data/input/:
+```
 
-text
+---
+
+## Формат главы
+
+Файлы в `data/input/`:
+
+```
 001_пробуждение.md
 002_встреча.md
 003_дорога_на_север.md
-Правила:
+```
 
-Начинается с порядкового номера (001, 002, ...)
+**Правила:**
+- Начинается с порядкового номера (`001`, `002`, ...)
+- Дальше подчёркивание и название
+- Расширение `.md` или `.txt`
+- Кодировка UTF-8 (VSCode сохраняет по умолчанию)
 
-Дальше подчёркивание и название
-
-Расширение .md или .txt
-
-Кодировка UTF-8 (VSCode сохраняет по умолчанию)
-
-Внутри — обычный текст. Пустые строки между абзацами помогают
+**Внутри — обычный текст.** Пустые строки между абзацами помогают
 чанкеру, но не обязательны — есть fallback на разбивку по предложениям.
 
-Что на выходе
-text
+---
+
+## Что на выходе
+
+```
 data/output/
 ├── entities/                ← финальная база
 │   ├── characters/
@@ -168,8 +185,11 @@ data/output/
     ├── index.json           ← оглавление базы
     ├── unresolved.jsonl     ← неклассифицированное
     └── raw/                 ← чистые ответы LLM (для отладки)
-Пример объекта
-json
+```
+
+### Пример объекта
+
+```json
 {
   "id": "char_knyaz_andrey",
   "type": "character",
@@ -195,18 +215,19 @@ json
     "extractor": "qwen2.5-coder:14b"
   }
 }
-Ключевые поля:
+```
 
-sources — все цитаты из всех глав, где упомянут персонаж
+**Ключевые поля:**
+- `sources` — **все** цитаты из **всех** глав, где упомянут персонаж
+- `meta.revision` — сколько раз объект обогащался
+- `relations` — связи с другими объектами базы
+- `attributes` — тип-специфичные поля (для персонажа — gender/occupation, для города — population)
 
-meta.revision — сколько раз объект обогащался
+---
 
-relations — связи с другими объектами базы
+## Архитектура
 
-attributes — тип-специфичные поля (для персонажа — gender/occupation, для города — population)
-
-Архитектура
-text
+```
 crates/
 ├── core/       — типы: Entity, EntityId, Relation, Source
 ├── ingest/     — чтение глав, чанкинг, manifest
@@ -215,18 +236,26 @@ crates/
 ├── merge/      — слияние дублей, генерация ID, запись файлов
 ├── storage/    — JSONL, пути проекта
 └── cli/        — бинарник loreforge
+```
+
 Пайплайн:
 
-text
+```
 TXT главы
    ↓ [ingest] чтение → чанки
    ↓ [extract] каждый чанк → LLM → JSON сущностей
    ↓ [merge] все JSON → единые объекты → файлы
    ↓
 JSON-база
-Настройка
-loreforge.toml
-toml
+```
+
+---
+
+## Настройка
+
+### `loreforge.toml`
+
+```toml
 [llm]
 endpoint = "http://localhost:11434"
 default_model = "qwen2.5-coder:14b"
@@ -239,80 +268,51 @@ extract_light = "qwen2.5-coder:7b"           # скорость
 extract_long  = "qwen3:8b-64k"               # длинные чанки
 classify      = "qwen2.5-coder:7b"           # классификация
 code          = "maternion/strand-rust-coder:14b-q4_K_M"  # кодогенерация
-prompts/extract_entities.md
-Промпт для LLM. Можно править без пересборки — loreforge.exe подхватит
+```
+
+### `prompts/extract_entities.md`
+
+Промпт для LLM. **Можно править без пересборки** — `loreforge.exe` подхватит
 изменения при следующем запуске. Если файла нет — используется встроенный.
-
-Дорожная карта
-✅ v0.1 — ingest + extract + merge, portable exe
-
-🔜 v0.2 — alias-resolution (объединение «Андрей» и «Князь Андрей» в один объект)
-
-🔜 v0.3 — export в форматы игровых движков (Godot, Unity, Bevy)
-
-🔜 v0.4 — граф связей + визуализация
-
-🔜 v0.5 — timeline событий с хронологией
-
-🔜 v1.0 — интеграция с онлайн-сервером игры
-
-Философия
-Локально, не в облаке. Всё через Ollama, никаких OpenAI.
-
-Не терять данные. Все цитаты и упоминания сохраняются.
-
-Инкрементально. Добавил главу — база обогатилась. Никаких полных пересборок.
-
-Портативно. Один .exe, одна папка, всё автономно.
-
-Прозрачно. Все промежуточные файлы доступны для отладки.
-
-Расширяемо. Промпт, конфиг, схема — всё редактируется.
-
-Лицензия
-MIT — используй как хочешь.
-
-Вклад
-Issues и PR приветствуются. Для крупных изменений — сначала открой Issue.
-
-Благодарности
-Ollama — за локальный LLM-инференс
-
-Qwen — за модели
-
-Сообществу Rust — за прекрасные крейты
-
-text
-
-**Сохрани** `Ctrl+S`.
 
 ---
 
-## Шаг 3 — LICENSE (MIT)
+## Дорожная карта
 
-**Файл `C:\projects\lore-forge\LICENSE`:**
+- ✅ **v0.1** — ingest + extract + merge, portable exe
+- 🔜 **v0.2** — alias-resolution (объединение «Андрей» и «Князь Андрей» в один объект)
+- 🔜 **v0.3** — export в форматы игровых движков (Godot, Unity, Bevy)
+- 🔜 **v0.4** — граф связей + визуализация
+- 🔜 **v0.5** — timeline событий с хронологией
+- 🔜 **v1.0** — интеграция с онлайн-сервером игры
 
-```powershell
-code C:\projects\lore-forge\LICENSE
-text
-MIT License
+---
 
-Copyright (c) 2026 No4ka
+## Философия
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+- **Локально, не в облаке.** Всё через Ollama, никаких OpenAI.
+- **Не терять данные.** Все цитаты и упоминания сохраняются.
+- **Инкрементально.** Добавил главу — база обогатилась. Никаких полных пересборок.
+- **Портативно.** Один `.exe`, одна папка, всё автономно.
+- **Прозрачно.** Все промежуточные файлы доступны для отладки.
+- **Расширяемо.** Промпт, конфиг, схема — всё редактируется.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+---
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+## Лицензия
+
+MIT — используй как хочешь.
+
+---
+
+## Вклад
+
+Issues и PR приветствуются. Для крупных изменений — сначала открой Issue.
+
+---
+
+## Благодарности
+
+- [Ollama](https://ollama.com) — за локальный LLM-инференс
+- [Qwen](https://github.com/QwenLM/Qwen2.5) — за модели
+- Сообществу Rust — за прекрасные крейты
